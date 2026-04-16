@@ -21,9 +21,10 @@ interface MatchCardProps {
   match: PatternWindow;
   score: number;
   rank: number;
+  fullBars?: import('@/lib/api').OhlcBar[];
 }
 
-export function MatchCard({ match, score, rank }: MatchCardProps) {
+export function MatchCard({ match, score, rank, fullBars = [] }: MatchCardProps) {
   const [modalOpen, setModalOpen] = useState(false);
 
   const patternData = match.pattern.map((v, i) => ({
@@ -160,6 +161,7 @@ export function MatchCard({ match, score, rank }: MatchCardProps) {
         rank={rank}
         open={modalOpen}
         onClose={() => setModalOpen(false)}
+        fullBars={fullBars}
       />
     </>
   );

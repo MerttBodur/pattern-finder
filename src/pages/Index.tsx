@@ -50,6 +50,7 @@ function ResultSection({
   badge,
   badgeVariant = 'default',
   emptyMsg,
+  allHistory,
 }: {
   title: string;
   icon: React.ReactNode;
@@ -57,6 +58,7 @@ function ResultSection({
   badge?: string;
   badgeVariant?: 'default' | 'secondary' | 'outline';
   emptyMsg: string;
+  allHistory: Record<string, OhlcBar[]>;
 }) {
   return (
     <Card>
@@ -79,6 +81,7 @@ function ResultSection({
                 match={r.window}
                 score={r.score}
                 rank={i + 1}
+                fullBars={allHistory[r.window.ticker] ?? []}
               />
             ))}
           </div>
@@ -269,6 +272,7 @@ export default function Index() {
                   badge="Aynı dönem"
                   badgeVariant="default"
                   emptyMsg={`${queryDates.start} – ${queryDates.end} döneminde bu pattern'i sergileyen başka hisse bulunamadı.`}
+                  allHistory={allHistory}
                 />
 
                 {/* Geçmiş trend gösterenler */}
@@ -279,6 +283,7 @@ export default function Index() {
                   badge="Tarihsel"
                   badgeVariant="secondary"
                   emptyMsg="Geçmişte bu pattern'i gösteren hisse bulunamadı."
+                  allHistory={allHistory}
                 />
               </div>
             )}
