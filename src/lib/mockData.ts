@@ -1,9 +1,15 @@
-// Generate synthetic stock price data using random walk
+export interface OhlcBar {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+}
 
 export interface StockSeries {
   ticker: string;
-  prices: number[];
-  volume: number[];
+  bars: OhlcBar[];
   marketCap: 'small' | 'large';
 }
 
@@ -15,20 +21,33 @@ function seededRandom(seed: number) {
   };
 }
 
-function generateRandomWalk(seed: number, days: number, startPrice: number): number[] {
+function generateOhlcSeries(seed: number, days: number, startPrice: number, baseVolume: number): OhlcBar[] {
   const rand = seededRandom(seed);
-  const prices: number[] = [startPrice];
-  for (let i = 1; i < days; i++) {
-    const drift = (rand() - 0.48) * 0.03;
-    const vol = (rand() - 0.5) * 0.04;
-    prices.push(Math.max(1, prices[i - 1] * (1 + drift + vol)));
-  }
-  return prices.map(p => Math.round(p * 100) / 100);
-}
+  const bars: OhlcBar[] = [];
+  let prevClose = startPrice;
 
-function generateVolume(seed: number, days: number, base: number): number[] {
-  const rand = seededRandom(seed);
-  return Array.from({ length: days }, () => Math.round(base * (0.6 + rand() * 0.8)));
+  for (let i = 0; i < days; i++) {
+    const drift = (rand() - 0.48) * 0.03;
+    const intraday = (rand() - 0.5) * 0.04;
+    const open = prevClose;
+    const close = Math.max(1, open * (1 + drift + intraday));
+    const high = Math.max(open, close) * (1 + rand() * 0.015);
+    const low = Math.min(open, close) * (1 - rand() * 0.015);
+    const volume = Math.round(baseVolume * (0.6 + rand() * 0.8));
+
+    bars.push({
+      date: `Day ${i + 1}`,
+      open: Math.round(open * 100) / 100,
+      high: Math.round(high * 100) / 100,
+      low: Math.round(low * 100) / 100,
+      close: Math.round(close * 100) / 100,
+      volume,
+    });
+
+    prevClose = close;
+  }
+
+  return bars;
 }
 
 const TICKERS = [
@@ -50,8 +69,7 @@ export function generateMockDataset(): StockSeries[] {
     const baseVolume = marketCap === 'large' ? 12_000_000 + i * 120_000 : 900_000 + i * 35_000;
     return {
       ticker,
-      prices: generateRandomWalk(i * 137 + 42, 120, 50 + (i % 10) * 30),
-      volume: generateVolume(i * 911 + 19, 120, baseVolume),
+      bars: generateOhlcSeries(i * 137 + 42, 120, 50 + (i % 10) * 30, baseVolume),
       marketCap,
     };
   });
@@ -78,11 +96,13 @@ function normalizePattern(prices: number[]): number[] {
 export function extractWindows(dataset: StockSeries[], windowSize = 30, forwardDays = 20): PatternWindow[] {
   const windows: PatternWindow[] = [];
   for (const series of dataset) {
-    const maxStart = series.prices.length - windowSize - forwardDays;
+    const closes = series.bars.map(bar => bar.close);
+    const volumes = series.bars.map(bar => bar.volume);
+    const maxStart = closes.length - windowSize - forwardDays;
     for (let start = 0; start <= maxStart; start += 5) {
-      const slice = series.prices.slice(start, start + windowSize);
-      const forward = series.prices.slice(start + windowSize, start + windowSize + forwardDays);
-      const volumeSlice = series.volume.slice(start, start + windowSize);
+      const slice = closes.slice(start, start + windowSize);
+      const forward = closes.slice(start + windowSize, start + windowSize + forwardDays);
+      const volumeSlice = volumes.slice(start, start + windowSize);
       const basePrice = slice[slice.length - 1];
       windows.push({
         ticker: series.ticker,
