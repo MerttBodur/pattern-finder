@@ -2,7 +2,9 @@
 
 export interface StockSeries {
   ticker: string;
-  prices: number[]; // 120 daily close prices
+  prices: number[];
+  volume: number[];
+  marketCap: 'small' | 'large';
 }
 
 function seededRandom(seed: number) {
@@ -17,11 +19,16 @@ function generateRandomWalk(seed: number, days: number, startPrice: number): num
   const rand = seededRandom(seed);
   const prices: number[] = [startPrice];
   for (let i = 1; i < days; i++) {
-    const drift = (rand() - 0.48) * 0.03; // slight upward bias
+    const drift = (rand() - 0.48) * 0.03;
     const vol = (rand() - 0.5) * 0.04;
     prices.push(Math.max(1, prices[i - 1] * (1 + drift + vol)));
   }
   return prices.map(p => Math.round(p * 100) / 100);
+}
+
+function generateVolume(seed: number, days: number, base: number): number[] {
+  const rand = seededRandom(seed);
+  return Array.from({ length: days }, () => Math.round(base * (0.6 + rand() * 0.8)));
 }
 
 const TICKERS = [
@@ -38,18 +45,27 @@ const TICKERS = [
 ];
 
 export function generateMockDataset(): StockSeries[] {
-  return TICKERS.map((ticker, i) => ({
-    ticker,
-    prices: generateRandomWalk(i * 137 + 42, 120, 50 + (i % 10) * 30),
-  }));
+  return TICKERS.map((ticker, i) => {
+    const marketCap: 'small' | 'large' = i < 50 ? 'large' : 'small';
+    const baseVolume = marketCap === 'large' ? 12_000_000 + i * 120_000 : 900_000 + i * 35_000;
+    return {
+      ticker,
+      prices: generateRandomWalk(i * 137 + 42, 120, 50 + (i % 10) * 30),
+      volume: generateVolume(i * 911 + 19, 120, baseVolume),
+      marketCap,
+    };
+  });
 }
 
 export interface PatternWindow {
   ticker: string;
   startIdx: number;
-  pattern: number[]; // normalized 30-point pattern
-  forwardPrices: number[]; // next 20 days after pattern
+  pattern: number[];
+  forwardPrices: number[];
   forwardReturns: { day5: number; day10: number; day20: number };
+  avgVolume: number;
+  avgPrice: number;
+  marketCap: 'small' | 'large';
 }
 
 function normalizePattern(prices: number[]): number[] {
@@ -63,9 +79,10 @@ export function extractWindows(dataset: StockSeries[], windowSize = 30, forwardD
   const windows: PatternWindow[] = [];
   for (const series of dataset) {
     const maxStart = series.prices.length - windowSize - forwardDays;
-    for (let start = 0; start <= maxStart; start += 5) { // step by 5 to reduce count
+    for (let start = 0; start <= maxStart; start += 5) {
       const slice = series.prices.slice(start, start + windowSize);
       const forward = series.prices.slice(start + windowSize, start + windowSize + forwardDays);
+      const volumeSlice = series.volume.slice(start, start + windowSize);
       const basePrice = slice[slice.length - 1];
       windows.push({
         ticker: series.ticker,
@@ -77,6 +94,9 @@ export function extractWindows(dataset: StockSeries[], windowSize = 30, forwardD
           day10: forward.length >= 10 ? ((forward[9] - basePrice) / basePrice) * 100 : 0,
           day20: forward.length >= 20 ? ((forward[19] - basePrice) / basePrice) * 100 : 0,
         },
+        avgVolume: volumeSlice.reduce((a, b) => a + b, 0) / volumeSlice.length,
+        avgPrice: slice.reduce((a, b) => a + b, 0) / slice.length,
+        marketCap: series.marketCap,
       });
     }
   }
