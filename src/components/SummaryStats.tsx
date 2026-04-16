@@ -1,5 +1,5 @@
 import { Card, CardContent } from '@/components/ui/card';
-import type { PatternWindow } from '@/lib/mockData';
+import type { PatternWindow } from '@/lib/patternMatcher';
 
 interface SummaryStatsProps {
   matches: { window: PatternWindow; score: number }[];
@@ -23,10 +23,18 @@ export function SummaryStats({ matches }: SummaryStatsProps) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {stats.map(s => (
-        <Card key={s.label}>
+        <Card key={s.label} data-testid={`stat-${s.label}`}>
           <CardContent className="p-4 text-center">
             <p className="text-xs text-muted-foreground">{s.label}</p>
-            <p className={`text-lg font-bold ${s.positive !== undefined ? (s.positive ? 'text-green-600' : 'text-destructive') : ''}`}>
+            <p
+              className={`text-lg font-bold ${
+                s.positive !== undefined
+                  ? s.positive
+                    ? 'text-green-600'
+                    : 'text-destructive'
+                  : ''
+              }`}
+            >
               {s.value}
             </p>
           </CardContent>

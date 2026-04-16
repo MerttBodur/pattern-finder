@@ -1,54 +1,77 @@
-import { useState, useMemo, useCallback } from 'react';
-import { ImageUpload } from '@/components/ImageUpload';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { MatchCard } from '@/components/MatchCard';
 import { SummaryStats } from '@/components/SummaryStats';
-import { generateMockDataset, extractWindows, type PatternWindow } from '@/lib/mockData';
-import { extractPatternFromImage } from '@/lib/imageExtractor';
-import { dtwDistance, similarityScore } from '@/lib/dtw';
-import { TrendingUp } from 'lucide-react';
+import { StockSelector } from '@/components/StockSelector';
+import { fetchTickers, fetchAllHistory, type OhlcBar } from '@/lib/api';
+import { extractPatternWindows, findTopMatches, type PatternWindow } from '@/lib/patternMatcher';
+import { TrendingUp, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { useToast } from '@/hooks/use-toast';
 
-const TOP_N = 10;
+type Match = { window: PatternWindow; score: number };
 
 export default function Index() {
-  const [file, setFile] = useState<File | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [results, setResults] = useState<{ window: PatternWindow; score: number }[] | null>(null);
+  const { toast } = useToast();
 
-  const windows = useMemo(() => {
-    const dataset = generateMockDataset();
-    return extractWindows(dataset);
+  const [largeCap, setLargeCap] = useState<string[]>([]);
+  const [smallCap, setSmallCap] = useState<string[]>([]);
+  const [allHistory, setAllHistory] = useState<Record<string, OhlcBar[]>>({});
+  const [loadingHistory, setLoadingHistory] = useState(true);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  const [analyzing, setAnalyzing] = useState(false);
+  const [results, setResults] = useState<Match[] | null>(null);
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const [tickers, history] = await Promise.all([fetchTickers(), fetchAllHistory()]);
+        setLargeCap(tickers.large);
+        setSmallCap(tickers.small);
+        setAllHistory(history);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setHistoryError(msg);
+        toast({ title: 'Veri yüklenemedi', description: msg, variant: 'destructive' });
+      } finally {
+        setLoadingHistory(false);
+      }
+    }
+    load();
   }, []);
 
-  const handleAnalyze = useCallback(async () => {
-    if (!file) return;
-    setAnalyzing(true);
-    setResults(null);
+  const patternWindows = useMemo(() => {
+    if (!largeCap.length || !smallCap.length || !Object.keys(allHistory).length) return [];
+    return extractPatternWindows(allHistory, largeCap, smallCap);
+  }, [allHistory, largeCap, smallCap]);
 
-    try {
-      const userPattern = await extractPatternFromImage(file);
-      const distances = windows.map(w => ({
-        window: w,
-        distance: dtwDistance(userPattern, w.pattern),
-      }));
+  const handleAnalyze = useCallback(
+    async (ticker: string, pattern: number[], _windowStart: number) => {
+      if (!patternWindows.length) {
+        toast({ title: 'Veri hazır değil', description: 'Lütfen bekleyin.', variant: 'destructive' });
+        return;
+      }
 
-      const maxDist = Math.max(...distances.map(d => d.distance), 1);
-      distances.sort((a, b) => a.distance - b.distance);
-      const topMatches = distances.slice(0, TOP_N).map(d => ({
-        window: d.window,
-        score: similarityScore(d.distance, maxDist),
-      }));
+      setAnalyzing(true);
+      setResults(null);
 
-      setResults(topMatches);
-    } catch (err) {
-      console.error('Analysis failed:', err);
-    } finally {
-      setAnalyzing(false);
-    }
-  }, [file, windows]);
+      try {
+        await new Promise(r => setTimeout(r, 10));
+        const windowsExcludingSelf = patternWindows.filter(w => w.ticker !== ticker);
+        const matches = findTopMatches(pattern, windowsExcludingSelf, 10);
+        setResults(matches);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        toast({ title: 'Analiz hatası', description: msg, variant: 'destructive' });
+      } finally {
+        setAnalyzing(false);
+      }
+    },
+    [patternWindows, toast],
+  );
 
-  const smallCap = results?.filter(r => r.window.marketCap === 'small') ?? [];
-  const largeCap = results?.filter(r => r.window.marketCap === 'large') ?? [];
+  const smallCapResults = results?.filter(r => r.window.marketCap === 'small') ?? [];
+  const largeCapResults = results?.filter(r => r.window.marketCap === 'large') ?? [];
 
   return (
     <div className="min-h-screen bg-background">
@@ -56,34 +79,97 @@ export default function Index() {
         <div className="mb-8 text-center">
           <div className="mb-2 flex items-center justify-center gap-2">
             <TrendingUp className="h-8 w-8 text-primary" />
-            <h1 className="text-2xl font-bold tracking-tight">Stock Pattern Scanner</h1>
+            <h1 className="text-2xl font-bold tracking-tight">BIST Pattern Scanner</h1>
           </div>
-          <p className="text-sm text-muted-foreground">Bir hisse grafiği yükleyin — benzer tarihsel pattern'leri ve ileri fiyat hareketlerini görün</p>
+          <p className="text-sm text-muted-foreground">
+            Gerçek Yahoo Finance verileriyle BIST hisselerinde tarihsel pattern eşleştirmesi
+          </p>
         </div>
 
-        <div className="mx-auto mb-8 max-w-md">
-          <ImageUpload onFileSelect={setFile} onAnalyze={handleAnalyze} isAnalyzing={analyzing} selectedFile={file} />
-        </div>
-
-        {analyzing && <p className="text-center text-sm text-muted-foreground animate-pulse">{windows.length} pattern penceresi taranıyor...</p>}
-
-        {results && (
+        {loadingHistory ? (
+          <div className="flex flex-col items-center gap-3 py-16 text-muted-foreground">
+            <Loader2 className="h-8 w-8 animate-spin" />
+            <p className="text-sm">BIST hisse verileri Yahoo Finance'tan yükleniyor...</p>
+            <p className="text-xs text-muted-foreground/60">50 hisse için geçmiş veri çekiliyor, bu 30-60 saniye sürebilir.</p>
+          </div>
+        ) : historyError ? (
+          <div className="py-12 text-center">
+            <p className="text-sm text-destructive">Veri yükleme hatası: {historyError}</p>
+            <p className="mt-2 text-xs text-muted-foreground">Backend'in çalıştığından emin olun.</p>
+          </div>
+        ) : (
           <div className="space-y-6">
-            <SummaryStats matches={results} />
+            <StockSelector
+              largeCap={largeCap}
+              smallCap={smallCap}
+              stockHistory={allHistory}
+              onAnalyze={handleAnalyze}
+              isAnalyzing={analyzing}
+              isLoadingHistory={loadingHistory}
+            />
 
-            <Card>
-              <CardHeader><CardTitle>Küçük Hacim / Küçük Boyutlu Hisseler</CardTitle></CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {smallCap.length > 0 ? smallCap.map((r, i) => <MatchCard key={`${r.window.ticker}-${r.window.startIdx}`} match={r.window} score={r.score} rank={i + 1} />) : <p className="text-sm text-muted-foreground">Kayıt yok</p>}
-              </CardContent>
-            </Card>
+            {analyzing && (
+              <div className="flex items-center justify-center gap-2 py-4 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {patternWindows.length.toLocaleString()} pattern penceresi taranıyor...
+              </div>
+            )}
 
-            <Card>
-              <CardHeader><CardTitle>Büyük Hacim / Büyük Boyutlu Hisseler</CardTitle></CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {largeCap.length > 0 ? largeCap.map((r, i) => <MatchCard key={`${r.window.ticker}-${r.window.startIdx}`} match={r.window} score={r.score} rank={i + 1} />) : <p className="text-sm text-muted-foreground">Kayıt yok</p>}
-              </CardContent>
-            </Card>
+            {results && (
+              <div className="space-y-6">
+                <SummaryStats matches={results} />
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      Küçük Cap Eşleşmeler
+                      <span className="text-sm font-normal text-muted-foreground">({smallCapResults.length} sonuç)</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {smallCapResults.length > 0 ? (
+                      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        {smallCapResults.map((r, i) => (
+                          <MatchCard
+                            key={`${r.window.ticker}-${r.window.startIdx}`}
+                            match={r.window}
+                            score={r.score}
+                            rank={i + 1}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Bu analiz için küçük cap eşleşmesi yok.</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      Büyük Cap Eşleşmeler
+                      <span className="text-sm font-normal text-muted-foreground">({largeCapResults.length} sonuç)</span>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {largeCapResults.length > 0 ? (
+                      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                        {largeCapResults.map((r, i) => (
+                          <MatchCard
+                            key={`${r.window.ticker}-${r.window.startIdx}`}
+                            match={r.window}
+                            score={r.score}
+                            rank={i + 1}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Bu analiz için büyük cap eşleşmesi yok.</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            )}
           </div>
         )}
       </div>
