@@ -1,3 +1,5 @@
+import { generateMockDataset } from './mockData';
+
 export interface OhlcBar {
   date: string;
   open: number;
@@ -12,26 +14,58 @@ export interface BistTickers {
   small: string[];
 }
 
+// Generate ISO dates ending today, going back N business days
+function generateDates(count: number): string[] {
+  const dates: string[] = [];
+  const d = new Date();
+  while (dates.length < count) {
+    const day = d.getDay();
+    if (day !== 0 && day !== 6) {
+      dates.push(d.toISOString().split('T')[0]);
+    }
+    d.setDate(d.getDate() - 1);
+  }
+  return dates.reverse();
+}
+
+let cachedTickers: BistTickers | null = null;
+let cachedHistory: Record<string, OhlcBar[]> | null = null;
+
+function buildCache() {
+  if (cachedHistory && cachedTickers) return;
+  const dataset = generateMockDataset();
+  const history: Record<string, OhlcBar[]> = {};
+  const large: string[] = [];
+  const small: string[] = [];
+
+  for (const series of dataset) {
+    const ticker = `${series.ticker}.IS`;
+    const dates = generateDates(series.bars.length);
+    history[ticker] = series.bars.map((bar, i) => ({
+      ...bar,
+      date: dates[i],
+    }));
+    if (series.marketCap === 'large') large.push(ticker);
+    else small.push(ticker);
+  }
+
+  cachedHistory = history;
+  cachedTickers = { large, small };
+}
+
 export async function fetchTickers(): Promise<BistTickers> {
-  const res = await fetch('/api/tickers');
-  if (!res.ok) throw new Error('Ticker listesi alınamadı');
-  return res.json();
+  buildCache();
+  return cachedTickers!;
 }
 
 export async function fetchStockHistory(ticker: string): Promise<OhlcBar[]> {
-  const res = await fetch(`/api/stock/${encodeURIComponent(ticker)}/history`);
-  if (!res.ok) throw new Error(`${ticker} verisi alınamadı`);
-  const data = await res.json();
-  return (data as OhlcBar[]).filter(b => b.close != null);
+  buildCache();
+  const bars = cachedHistory![ticker];
+  if (!bars) throw new Error(`${ticker} verisi bulunamadı`);
+  return bars.filter(b => b.close != null);
 }
 
 export async function fetchAllHistory(): Promise<Record<string, OhlcBar[]>> {
-  const res = await fetch('/api/all-history');
-  if (!res.ok) throw new Error('Toplu veri alınamadı');
-  const data = await res.json() as Record<string, OhlcBar[]>;
-  const result: Record<string, OhlcBar[]> = {};
-  for (const [ticker, bars] of Object.entries(data)) {
-    result[ticker] = bars.filter(b => b.close != null);
-  }
-  return result;
+  buildCache();
+  return cachedHistory!;
 }
