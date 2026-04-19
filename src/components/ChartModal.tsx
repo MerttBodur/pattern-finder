@@ -107,9 +107,12 @@ function CandlestickChart({
   const hlStartIdx = highlightStart
     ? bars.findIndex(b => b.date >= highlightStart)
     : -1;
-  const hlEndIdx = highlightEnd
-    ? bars.findLastIndex(b => b.date <= highlightEnd)
-    : -1;
+  let hlEndIdx = -1;
+  if (highlightEnd) {
+    for (let i = bars.length - 1; i >= 0; i--) {
+      if (bars[i].date <= highlightEnd) { hlEndIdx = i; break; }
+    }
+  }
   const hlX1 = hlStartIdx >= 0 ? ML + hlStartIdx * barSlot : null;
   const hlX2 = hlEndIdx >= 0 ? ML + (hlEndIdx + 1) * barSlot : null;
 
